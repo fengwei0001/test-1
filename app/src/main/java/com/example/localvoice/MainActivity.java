@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.speech.SpeechRecognizer;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -61,7 +62,8 @@ public final class MainActivity extends Activity {
         OFFLINE_PARAFORMER,
         SENSEVOICE,
         SMART,
-        VAD_MODE
+        VAD_MODE,
+        ANDROID_SYSTEM
     }
 
     private final ExecutorService modelExecutor = Executors.newSingleThreadExecutor();
@@ -79,6 +81,7 @@ public final class MainActivity extends Activity {
     private RadioButton senseVoiceOption;
     private RadioButton smartOption;
     private RadioButton vadOption;
+    private RadioButton systemOption;
 
     private volatile boolean isRecording;
     private volatile boolean activityDestroyed;
@@ -90,6 +93,7 @@ public final class MainActivity extends Activity {
     private OfflineRecognizer offlineParaformerRecognizer;
     private OfflineRecognizer senseVoiceRecognizer;
     private volatile OfflinePunctuation punctuation;
+    private SystemSpeechController systemSpeechController;
     private Thread recordingThread;
     private int modelGeneration;
     private boolean modelLoading;
@@ -97,6 +101,56 @@ public final class MainActivity extends Activity {
     private boolean processing;
     private boolean suppressNextClick;
     private String displayedText = "";
+
+    private final SystemSpeechController.Listener systemListener =
+            new SystemSpeechController.Listener() {
+                @Override
+                public void onStatus(int messageRes, boolean ready) {
+                    if (activityDestroyed || selectedEngine != Engine.ANDROID_SYSTEM) {
+                        return;
+                    }
+                    modelLoading = false;
+                    modelReady = ready;
+                    statusText.setText(messageRes);
+                    updateControls();
+                }
+
+                @Override
+                public void onDownloadProgress(int percent) {
+                    if (activityDestroyed || selectedEngine != Engine.ANDROID_SYSTEM) {
+                        return;
+                    }
+                    modelLoading = false;
+                    modelReady = false;
+                    statusText.setText(getString(
+                            R.string.system_download_progress, percent));
+                    updateControls();
+                }
+
+                @Override
+                public void onPartialResult(String text) {
+                    displayTranscript(text);
+                }
+
+                @Override
+                public void onFinalResult(String text) {
+                    finishRecording(text, null);
+                }
+
+                @Override
+                public void onSessionError(int error) {
+                    if (activityDestroyed) {
+                        return;
+                    }
+                    boolean noMatch = error == SpeechRecognizer.ERROR_NO_MATCH
+                            || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+                    finishRecording("", noMatch ? null
+                            : new IllegalStateException("System recognizer error " + error));
+                    if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                        statusText.setText(R.string.system_language_unavailable);
+                    }
+                }
+            };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,6 +170,7 @@ public final class MainActivity extends Activity {
         senseVoiceOption = findViewById(R.id.senseVoiceOption);
         smartOption = findViewById(R.id.smartOption);
         vadOption = findViewById(R.id.vadOption);
+        systemOption = findViewById(R.id.systemOption);
 
         zipformerOption.setOnClickListener(v -> selectEngine(Engine.ZIPFORMER));
         onlineParaformerOption.setOnClickListener(v -> selectEngine(Engine.ONLINE_PARAFORMER));
@@ -123,7 +178,9 @@ public final class MainActivity extends Activity {
         senseVoiceOption.setOnClickListener(v -> selectEngine(Engine.SENSEVOICE));
         smartOption.setOnClickListener(v -> selectEngine(Engine.SMART));
         vadOption.setOnClickListener(v -> selectEngine(Engine.VAD_MODE));
+        systemOption.setOnClickListener(v -> selectEngine(Engine.ANDROID_SYSTEM));
 
+        systemSpeechController = new SystemSpeechController(this, systemListener);
         recordButton.setOnTouchListener(this::onRecordButtonTouch);
         // 键盘、Switch Access 等无障碍操作可以用单击开始/停止，不依赖长按。
         recordButton.setOnClickListener(v -> onRecordButtonClick());
@@ -161,6 +218,7 @@ public final class MainActivity extends Activity {
         senseVoiceOption.setChecked(selectedEngine == Engine.SENSEVOICE);
         smartOption.setChecked(selectedEngine == Engine.SMART);
         vadOption.setChecked(selectedEngine == Engine.VAD_MODE);
+        systemOption.setChecked(selectedEngine == Engine.ANDROID_SYSTEM);
     }
 
     private void updateEngineText() {
@@ -180,6 +238,8 @@ public final class MainActivity extends Activity {
                 return R.string.title_smart;
             case VAD_MODE:
                 return R.string.title_vad;
+            case ANDROID_SYSTEM:
+                return R.string.title_system;
             case ZIPFORMER:
             default:
                 return R.string.title_zipformer;
@@ -198,6 +258,8 @@ public final class MainActivity extends Activity {
                 return R.string.subtitle_smart;
             case VAD_MODE:
                 return R.string.subtitle_vad;
+            case ANDROID_SYSTEM:
+                return R.string.subtitle_system;
             case ZIPFORMER:
             default:
                 return R.string.subtitle_zipformer;
@@ -216,6 +278,8 @@ public final class MainActivity extends Activity {
                 return R.string.label_smart;
             case VAD_MODE:
                 return R.string.label_vad;
+            case ANDROID_SYSTEM:
+                return R.string.label_system;
             case ZIPFORMER:
             default:
                 return R.string.label_zipformer;
@@ -224,6 +288,14 @@ public final class MainActivity extends Activity {
 
     private void initializeSelectedModel() {
         final Engine engine = selectedEngine;
+        if (engine == Engine.ANDROID_SYSTEM) {
+            modelReady = false;
+            modelLoading = true;
+            statusText.setText(R.string.system_checking);
+            updateControls();
+            systemSpeechController.initialize();
+            return;
+        }
         final int generation = ++modelGeneration;
         modelReady = false;
         updateControls();
@@ -351,6 +423,8 @@ public final class MainActivity extends Activity {
 
     private boolean isEngineLoaded(Engine engine) {
         switch (engine) {
+            case ANDROID_SYSTEM:
+                return systemSpeechController.isReady();
             case SMART:
                 return zipformerRecognizer != null && senseVoiceRecognizer != null;
             case ONLINE_PARAFORMER:
@@ -408,6 +482,7 @@ public final class MainActivity extends Activity {
         senseVoiceOption.setEnabled(!engineLocked);
         smartOption.setEnabled(!engineLocked);
         vadOption.setEnabled(!engineLocked);
+        systemOption.setEnabled(!engineLocked);
         recordButton.setEnabled(isRecording || (modelReady && !processing));
     }
 
@@ -601,6 +676,11 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        if (engine == Engine.ANDROID_SYSTEM) {
+            startSystemSpeechRecognition();
+            return;
+        }
+
         int minimumBufferSize = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minimumBufferSize <= 0) {
@@ -660,6 +740,31 @@ public final class MainActivity extends Activity {
         recordingThread = new Thread(
                 () -> processAudio(newAudioRecord, engine), "local-voice-recognition");
         recordingThread.start();
+    }
+
+    private void startSystemSpeechRecognition() {
+        recordingEngine = Engine.ANDROID_SYSTEM;
+        isRecording = true;
+        processing = false;
+        displayedText = "";
+        displayTranscript(getString(R.string.system_waiting));
+        statusText.setText(R.string.recording_streaming);
+        recordButton.setText(R.string.listening);
+        recordingTimer.setBase(SystemClock.elapsedRealtime());
+        recordingTimer.start();
+        updateControls();
+        try {
+            systemSpeechController.start();
+        } catch (Throwable error) {
+            Log.e(TAG, "Unable to start system speech recognition", error);
+            isRecording = false;
+            processing = false;
+            recordingEngine = null;
+            recordingTimer.stop();
+            statusText.setText(R.string.recognition_failed);
+            recordButton.setText(R.string.hold_to_talk);
+            updateControls();
+        }
     }
 
     private void processAudio(AudioRecord record, Engine engine) {
@@ -961,6 +1066,13 @@ public final class MainActivity extends Activity {
         isRecording = false;
         processing = true;
         recordingTimer.stop();
+        if (recordingEngine == Engine.ANDROID_SYSTEM) {
+            statusText.setText(R.string.system_finalizing);
+            recordButton.setText(R.string.hold_to_talk);
+            updateControls();
+            systemSpeechController.stop();
+            return;
+        }
         if (recordingEngine == Engine.SMART) {
             statusText.setText(R.string.smart_finalizing);
         } else {
@@ -1051,6 +1163,7 @@ public final class MainActivity extends Activity {
             }
         }
 
+        systemSpeechController.destroy();
         modelExecutor.shutdownNow();
         // 活跃识别线程结束时释放，避免 native 识别器在解码过程中被销毁。
         if (recordingThread == null) {

@@ -10,8 +10,8 @@ android {
         applicationId 'com.example.localvoice'
         minSdk 24
         targetSdk 36
-        versionCode 6
-        versionName '1.5'
+        versionCode 7
+        versionName '1.6'
 
         // 真机采用主流的 64 位 ARM，避免把其余 ABI 的 native 库打进 APK。
         ndk {

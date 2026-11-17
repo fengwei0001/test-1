@@ -61,12 +61,12 @@
         <GridLayout
             android:id="@+id/modelSelector"
             android:layout_width="match_parent"
-            android:layout_height="108dp"
+            android:layout_height="158dp"
             android:layout_marginTop="14dp"
             android:background="@drawable/model_selector_background"
             android:columnCount="3"
             android:padding="4dp"
-            android:rowCount="2">
+            android:rowCount="3">
 
             <RadioButton
                 android:id="@+id/zipformerOption"
@@ -98,6 +98,12 @@
                 android:id="@+id/vadOption"
                 style="@style/ModelOption"
                 android:text="@string/label_vad" />
+
+            <RadioButton
+                android:id="@+id/systemOption"
+                style="@style/ModelOption"
+                android:layout_columnSpan="3"
+                android:text="@string/label_system" />
         </GridLayout>
 
         <LinearLayout
