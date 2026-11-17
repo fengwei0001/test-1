@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#F5F7FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="primary_text">#14213D</color>
+    <color name="secondary_text">#667085</color>
+    <color name="accent">#5B5FEF</color>
+    <color name="accent_pressed">#4549C9</color>
+    <color name="accent_disabled">#C7C9D9</color>
+    <color name="success_background">#E8F7EE</color>
+    <color name="success_text">#18794E</color>
+</resources>
